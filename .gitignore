@@ -1,0 +1,23 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Node.js
+node_modules/
+.next/
+out/
+
+# Environment
+.env
+.env.local
+.env.production
+
+# AI models and generated images
+*.pth
+*.safetensors
+services/ai-api/outputs/
+services/ai-api/uploads/
+
+# macOS
+.DS_Store
