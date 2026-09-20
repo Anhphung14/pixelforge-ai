@@ -18,6 +18,8 @@ out/
 *.safetensors
 services/ai-api/outputs/
 services/ai-api/uploads/
+gfpgan/
+CodeFormer/
 
 # macOS
 .DS_Store
