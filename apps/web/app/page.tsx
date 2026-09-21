@@ -1,28 +1,89 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Sparkles,
+  ArrowRight,
+  Check,
   Download,
   ImageIcon,
+  Layers3,
   LoaderCircle,
+  RefreshCcw,
   ScanFace,
-  Layers,
-  Sliders,
-  Sun,
+  Sparkles,
+  SunMedium,
+  WandSparkles,
+  X,
+  Zap,
 } from "lucide-react";
 
-import ImageUploader from "@/components/image-uploader";
 import ImageComparison from "@/components/image-comparison";
-
+import ImageUploader from "@/components/image-uploader";
 import {
   enhanceImage,
-  type UpscaleScale,
-  type ModelType,
   type FaceRestorer,
+  type ModelType,
+  type UpscaleScale,
 } from "@/lib/api";
 
+const MAX_INPUT_DIMENSION = 1600;
+
+type Dimensions = { width: number; height: number };
+
+function ToggleCard({
+  active,
+  description,
+  disabled,
+  icon,
+  label,
+  onClick,
+  tone = "blue",
+}: {
+  active: boolean;
+  description: string;
+  disabled: boolean;
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  tone?: "blue" | "cyan" | "sky";
+}) {
+  const tones = {
+    blue: "border-blue-400/60 bg-blue-400/10 text-blue-100 shadow-blue-500/10",
+    cyan: "border-cyan-400/60 bg-cyan-400/10 text-cyan-100 shadow-cyan-500/10",
+    sky: "border-sky-400/60 bg-sky-400/10 text-sky-100 shadow-sky-500/10",
+  };
+
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      disabled={disabled}
+      onClick={onClick}
+      className={`group relative flex min-h-28 flex-col items-start rounded-2xl border p-4 text-left transition duration-200 disabled:cursor-not-allowed disabled:opacity-50 ${
+        active
+          ? `${tones[tone]} shadow-lg`
+          : "border-white/8 bg-white/[0.025] text-zinc-300 hover:-translate-y-0.5 hover:border-white/20 hover:bg-white/[0.05]"
+      }`}
+    >
+      <span className="mb-4 flex w-full items-center justify-between">
+        <span className="rounded-xl border border-white/10 bg-black/20 p-2.5">{icon}</span>
+        <span
+          className={`flex h-5 w-5 items-center justify-center rounded-full border transition ${
+            active ? "border-current bg-current" : "border-zinc-600"
+          }`}
+        >
+          {active && <Check size={13} className="text-[#0b0b10]" strokeWidth={3} />}
+        </span>
+      </span>
+      <span className="text-sm font-semibold text-white">{label}</span>
+      <span className="mt-1 text-xs leading-5 text-zinc-500">{description}</span>
+    </button>
+  );
+}
+
 export default function Home() {
+  const [language, setLanguage] = useState<"vi" | "en">("vi");
+  const isVi = language === "vi";
   const [file, setFile] = useState<File | null>(null);
   const [original, setOriginal] = useState<string | null>(null);
   const [result, setResult] = useState<string | null>(null);
@@ -30,46 +91,87 @@ export default function Home() {
   const [modelType, setModelType] = useState<ModelType>("general");
   const [faceEnhance, setFaceEnhance] = useState(false);
   const [faceRestorer, setFaceRestorer] = useState<FaceRestorer>("codeformer");
-  const [fidelity, setFidelity] = useState<number>(0.5);
+  const [fidelity, setFidelity] = useState(0.5);
   const [lowLightEnhance, setLowLightEnhance] = useState(false);
-  const [lowLightStrength, setLowLightStrength] = useState<number>(0.6);
-  const [dimensions, setDimensions] = useState<{ width: number; height: number } | null>(null);
+  const [lowLightStrength, setLowLightStrength] = useState(0.6);
+  const [freshnessEnhance, setFreshnessEnhance] = useState(false);
+  const [freshnessStrength, setFreshnessStrength] = useState(0.55);
+  const [dimensions, setDimensions] = useState<Dimensions | null>(null);
   const [loading, setLoading] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState("");
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    return () => {
-      if (original) URL.revokeObjectURL(original);
-    };
+    document.documentElement.lang = language;
+  }, [language]);
+
+  useEffect(() => () => abortRef.current?.abort(), []);
+
+  useEffect(() => {
+    if (!loading) return;
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => setElapsed(Math.floor((Date.now() - startedAt) / 1000)), 1000);
+    return () => window.clearInterval(timer);
+  }, [loading]);
+
+  useEffect(() => () => {
+    if (original) URL.revokeObjectURL(original);
   }, [original]);
 
-  useEffect(() => {
-    return () => {
-      if (result) URL.revokeObjectURL(result);
-    };
+  useEffect(() => () => {
+    if (result) URL.revokeObjectURL(result);
   }, [result]);
 
+  const effectiveDimensions = useMemo(() => {
+    if (!dimensions) return null;
+    const ratio = Math.min(1, MAX_INPUT_DIMENSION / Math.max(dimensions.width, dimensions.height));
+    return {
+      width: Math.round(dimensions.width * ratio * scale),
+      height: Math.round(dimensions.height * ratio * scale),
+      resized: ratio < 1,
+    };
+  }, [dimensions, scale]);
+
+  const enabledEnhancements = [freshnessEnhance, lowLightEnhance, faceEnhance].filter(Boolean).length;
+
+  function setAllEnhancements(enabled: boolean) {
+    setFreshnessEnhance(enabled);
+    setLowLightEnhance(enabled);
+    setFaceEnhance(enabled);
+  }
+
   function selectFile(selected: File) {
-    setFile(selected);
+    abortRef.current?.abort();
     const objectUrl = URL.createObjectURL(selected);
+    setFile(selected);
     setOriginal(objectUrl);
     setResult(null);
+    setDimensions(null);
     setError("");
 
-    // Calculate dimensions
     const img = new window.Image();
-    img.onload = () => {
-      setDimensions({ width: img.naturalWidth, height: img.naturalHeight });
-    };
+    img.onload = () => setDimensions({ width: img.naturalWidth, height: img.naturalHeight });
+    img.onerror = () => setError(isVi ? "Không thể đọc kích thước ảnh này." : "Unable to read this image.");
     img.src = objectUrl;
+  }
+
+  function clearFile() {
+    abortRef.current?.abort();
+    setFile(null);
+    setOriginal(null);
+    setResult(null);
+    setDimensions(null);
+    setError("");
   }
 
   async function handleEnhance() {
     if (!file || loading) return;
-
+    const controller = new AbortController();
+    abortRef.current = controller;
     setLoading(true);
+    setElapsed(0);
     setError("");
-    setResult(null);
 
     try {
       const blob = await enhanceImage(file, {
@@ -80,400 +182,263 @@ export default function Home() {
         fidelity,
         lowLightEnhance,
         lowLightStrength,
+        freshnessEnhance,
+        freshnessStrength,
+        signal: controller.signal,
       });
-
-      const resultUrl = URL.createObjectURL(blob);
-      setResult(resultUrl);
+      setResult(URL.createObjectURL(blob));
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Something went wrong."
-      );
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setError(isVi ? "Đã hủy xử lý ảnh." : "Image processing was cancelled.");
+      } else {
+        setError(err instanceof Error ? err.message : isVi ? "Không thể xử lý ảnh. Vui lòng thử lại." : "Unable to process the image. Please try again.");
+      }
     } finally {
+      abortRef.current = null;
       setLoading(false);
     }
   }
 
+  function cancelEnhance() {
+    abortRef.current?.abort();
+  }
+
   return (
-    <main className="min-h-screen bg-[#09090f] px-4 py-10 text-white">
-      <div className="mx-auto max-w-5xl">
-        <header className="mb-12 text-center">
-          <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-violet-500/30 bg-violet-500/10 px-4 py-2 text-sm text-violet-300">
-            <Sparkles size={16} />
-            AI Super-Resolution & CodeFormer Deblur Restoration
+    <main className="relative min-h-screen overflow-x-clip bg-[#03060b] text-white">
+      <div className="ambient ambient-one" />
+      <div className="ambient ambient-two" />
+
+      <div className="relative mx-auto max-w-[1440px] px-4 py-5 sm:px-6 lg:px-10 lg:py-8">
+        <nav className="mb-12 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="grid h-10 w-10 place-items-center rounded-2xl bg-gradient-to-br from-blue-500 to-cyan-400 shadow-lg shadow-blue-500/25">
+              <WandSparkles size={20} />
+            </span>
+            <div>
+              <p className="font-bold tracking-[-0.02em]">PixelForge AI</p>
+              <p className="text-[10px] uppercase tracking-[0.24em] text-slate-500">Image intelligence studio</p>
+            </div>
           </div>
+          <div className="flex items-center gap-2">
+            <span className="hidden items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-400/5 px-3 py-1.5 text-xs text-cyan-300 md:flex">
+              <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 shadow-[0_0_12px_#22d3ee]" />
+              {isVi ? "Xử lý riêng tư trên máy" : "Private on-device processing"}
+            </span>
+            <div className="flex rounded-xl border border-white/10 bg-white/[0.035] p-1" aria-label="Language selector">
+              {(["vi", "en"] as const).map((value) => (
+                <button key={value} type="button" aria-pressed={language === value} onClick={() => setLanguage(value)} className={`rounded-lg px-3 py-1.5 text-[11px] font-bold tracking-wider transition ${language === value ? "bg-blue-500 text-white shadow-lg shadow-blue-500/20" : "text-slate-500 hover:text-white"}`}>{value.toUpperCase()}</button>
+              ))}
+            </div>
+          </div>
+        </nav>
 
-          <h1 className="text-4xl font-bold tracking-tight md:text-6xl">
-            PixelForge
-            <span className="text-violet-400"> AI</span>
+        <header className="mx-auto mb-10 max-w-3xl text-center lg:mb-14">
+          <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-blue-400/20 bg-blue-400/5 px-3 py-1.5 text-xs font-semibold text-blue-300">
+            <Sparkles size={14} />
+            {isVi ? "Không chỉ phóng to — tái tạo lại từng chi tiết" : "More than upscaling — rebuild every detail"}
+          </div>
+          <h1 className="text-balance text-4xl font-semibold tracking-[-0.045em] sm:text-5xl lg:text-7xl">
+            {isVi ? "Tái định nghĩa chất lượng" : "Redefine image quality"}
+            <span className="gradient-text">{isVi ? " bằng AI." : " with AI."}</span>
           </h1>
-
-          <p className="mt-4 text-zinc-400">
-            Turn pixels into possibilities. Khôi phục độ nét cao và khử mờ khuôn mặt với CodeFormer AI.
+          <p className="mx-auto mt-5 max-w-2xl text-pretty text-sm leading-7 text-zinc-400 sm:text-base">
+            {isVi ? "Làm nét, phục hồi khuôn mặt, cân bằng ánh sáng và làm tươi màu ảnh bằng các mô hình AI chuyên biệt." : "Sharpen details, restore faces, balance lighting and revive colors with purpose-built AI models."}
           </p>
         </header>
 
-        <section className="rounded-3xl border border-zinc-800 bg-zinc-900/50 p-5 md:p-8">
-          <ImageUploader
-            onFileSelect={selectFile}
-            disabled={loading}
-          />
-
-          {original && (
-            <div className="mt-8">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <ImageIcon
-                    size={20}
-                    className="text-violet-400"
-                  />
-                  <h2 className="text-xl font-semibold">
-                    Image Preview
-                  </h2>
+        {!original ? (
+          <div className="mx-auto max-w-4xl">
+            <ImageUploader onFileSelect={selectFile} language={language} />
+            <div className="mt-5 grid grid-cols-2 gap-3 text-xs text-zinc-500 sm:grid-cols-4">
+              {(isVi ? ["Tối đa 10 MB", "JPG · PNG · WebP", "2× hoặc 4×", "Không lưu ảnh"] : ["Up to 10 MB", "JPG · PNG · WebP", "2× or 4×", "No image storage"]).map((item) => (
+                <div key={item} className="flex items-center justify-center gap-2 rounded-xl border border-white/5 bg-white/[0.02] px-3 py-3">
+                  <Check size={13} className="text-blue-400" /> {item}
                 </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <section className="studio-shell">
+            <div className="studio-preview">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="rounded-xl border border-white/10 bg-white/5 p-2 text-blue-300"><ImageIcon size={18} /></span>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{file?.name}</p>
+                    <p className="text-xs text-zinc-500">
+                      {dimensions ? `${dimensions.width} × ${dimensions.height} px` : isVi ? "Đang đọc ảnh…" : "Reading image…"}
+                      {file ? ` · ${(file.size / 1024 / 1024).toFixed(2)} MB` : ""}
+                    </p>
+                  </div>
+                </div>
+                <button type="button" disabled={loading} onClick={clearFile} className="icon-button" aria-label={isVi ? "Xóa ảnh" : "Remove image"}>
+                  <X size={17} />
+                </button>
+              </div>
 
-                {dimensions && (
-                  <div className="flex items-center gap-2 text-xs text-zinc-400">
-                    <span className="rounded-md bg-zinc-800 px-2 py-1">
-                      Gốc: {dimensions.width} × {dimensions.height} px
-                    </span>
-                    <span>➔</span>
-                    <span className="rounded-md bg-violet-950/60 px-2 py-1 font-medium text-violet-300">
-                      Mục tiêu: {dimensions.width * scale} × {dimensions.height * scale} px ({scale}×)
-                    </span>
+              <div className="preview-canvas">
+                {result ? (
+                  <ImageComparison before={original} after={result} language={language} />
+                ) : (
+                  // Blob URLs are generated locally and should not pass through the Next image optimizer.
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={original} alt={isVi ? "Ảnh gốc đã tải lên" : "Uploaded original"} className="max-h-[650px] w-full object-contain" />
+                )}
+                {loading && (
+                  <div className="absolute inset-0 z-30 grid place-items-center bg-[#09090e]/75 backdrop-blur-sm">
+                    <div className="text-center">
+                      <span className="mx-auto grid h-16 w-16 place-items-center rounded-2xl border border-blue-400/30 bg-blue-500/10 shadow-xl shadow-blue-500/10">
+                        <LoaderCircle className="animate-spin text-blue-300" size={28} />
+                      </span>
+                      <p className="mt-4 text-sm font-semibold">{isVi ? "AI đang tái tạo ảnh" : "AI is rebuilding your image"}</p>
+                      <p className="mt-1 text-xs text-zinc-400">{isVi ? `Đã xử lý trong ${elapsed} giây` : `Processing for ${elapsed} seconds`}</p>
+                      <button type="button" onClick={cancelEnhance} className="mt-4 text-xs text-zinc-400 underline decoration-zinc-600 underline-offset-4 hover:text-white">{isVi ? "Hủy xử lý" : "Cancel"}</button>
+                    </div>
                   </div>
                 )}
               </div>
 
-              {result ? (
-                <ImageComparison
-                  before={original}
-                  after={result}
-                />
-              ) : (
-                <div className="flex min-h-64 items-center justify-center rounded-2xl bg-zinc-950 p-4">
-                  <img
-                    src={original}
-                    alt="Uploaded image"
-                    className="max-h-[500px] max-w-full object-contain"
-                  />
+              {effectiveDimensions && (
+                <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                  <span className="rounded-lg bg-white/5 px-2.5 py-1.5">{isVi ? "Ảnh gốc" : "Original"} {dimensions?.width} × {dimensions?.height}</span>
+                  <ArrowRight size={13} />
+                  <span className="rounded-lg bg-blue-400/10 px-2.5 py-1.5 font-medium text-blue-300">
+                    {isVi ? "Đầu ra dự kiến" : "Expected output"} {effectiveDimensions.width} × {effectiveDimensions.height}
+                  </span>
+                  {effectiveDimensions.resized && <span className="text-cyan-300">{isVi ? "Ảnh được tối ưu về 1600 px trước khi xử lý" : "Image is optimized to 1600 px before processing"}</span>}
                 </div>
-              )}
-
-              {/* Controls bar */}
-              <div className="mt-6 flex flex-wrap items-center gap-4">
-                {/* Scale selection */}
-                <div className="flex items-center gap-2">
-                  <label
-                    htmlFor="scale"
-                    className="text-sm font-medium text-zinc-400"
-                  >
-                    Upscale
-                  </label>
-
-                  <select
-                    id="scale"
-                    value={scale}
-                    disabled={loading}
-                    onChange={(event) =>
-                      setScale(
-                        Number(event.target.value) as UpscaleScale
-                      )
-                    }
-                    className="rounded-xl border border-zinc-700 bg-zinc-800 px-3 py-2.5 text-sm font-medium focus:border-violet-500 focus:outline-none"
-                  >
-                    <option value={2}>2×</option>
-                    <option value={4}>4×</option>
-                  </select>
-                </div>
-
-                {/* Model Type */}
-                <div className="flex items-center gap-2">
-                  <label
-                    htmlFor="modelType"
-                    className="flex items-center gap-1 text-sm font-medium text-zinc-400"
-                  >
-                    <Layers size={15} />
-                    Chế độ
-                  </label>
-
-                  <select
-                    id="modelType"
-                    value={modelType}
-                    disabled={loading}
-                    onChange={(event) =>
-                      setModelType(event.target.value as ModelType)
-                    }
-                    className="rounded-xl border border-zinc-700 bg-zinc-800 px-3 py-2.5 text-sm font-medium focus:border-violet-500 focus:outline-none"
-                  >
-                    <option value="general">Ảnh chụp thực tế</option>
-                    <option value="anime">Anime / Đồ họa 2D</option>
-                  </select>
-                </div>
-
-                {/* Low Light Enhancement Toggle (Retinexformer) */}
-                <button
-                  type="button"
-                  disabled={loading}
-                  onClick={() => setLowLightEnhance((prev) => !prev)}
-                  className={`flex items-center gap-2 rounded-xl border px-3.5 py-2.5 text-sm font-medium transition ${
-                    lowLightEnhance
-                      ? "border-amber-500 bg-amber-500/20 text-amber-200 shadow-sm shadow-amber-500/30"
-                      : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600 hover:text-white"
-                  }`}
-                  title="Làm sáng ảnh thiếu sáng, tăng độ tương phản và chi tiết vùng tối bằng Retinexformer AI"
-                >
-                  <Sun size={16} className={lowLightEnhance ? "text-amber-400" : "text-zinc-400"} />
-                  <span>Làm sáng ảnh</span>
-                  <span
-                    className={`inline-block h-2 w-2 rounded-full ${
-                      lowLightEnhance ? "bg-amber-400" : "bg-zinc-600"
-                    }`}
-                  />
-                </button>
-
-                {/* Face Restoration Toggle */}
-                <button
-                  type="button"
-                  disabled={loading}
-                  onClick={() => setFaceEnhance((prev) => !prev)}
-                  className={`flex items-center gap-2 rounded-xl border px-3.5 py-2.5 text-sm font-medium transition ${
-                    faceEnhance
-                      ? "border-violet-500 bg-violet-500/20 text-violet-200 shadow-sm shadow-violet-500/30"
-                      : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600 hover:text-white"
-                  }`}
-                  title="Khôi phục ngũ quan, mắt, mũi, da tự nhiên cho ảnh mờ/vỡ hạt"
-                >
-                  <ScanFace size={16} className={faceEnhance ? "text-violet-400" : "text-zinc-400"} />
-                  <span>Làm rõ khuôn mặt</span>
-                  <span
-                    className={`inline-block h-2 w-2 rounded-full ${
-                      faceEnhance ? "bg-violet-400" : "bg-zinc-600"
-                    }`}
-                  />
-                </button>
-
-                {/* Enhance button */}
-                <button
-                  type="button"
-                  onClick={handleEnhance}
-                  disabled={loading}
-                  className="ml-auto flex items-center gap-2 rounded-xl bg-violet-600 px-6 py-2.5 font-semibold transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {loading ? (
-                    <LoaderCircle
-                      size={18}
-                      className="animate-spin"
-                    />
-                  ) : (
-                    <Sparkles size={18} />
-                  )}
-
-                  {loading
-                    ? "Enhancing..."
-                    : "Enhance Image"}
-                </button>
-
-                {result && (
-                  <a
-                    href={result}
-                    download="pixelforge-enhanced.png"
-                    className="flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-800 px-5 py-2.5 font-semibold transition hover:bg-zinc-700"
-                  >
-                    <Download size={18} />
-                    Download
-                  </a>
-                )}
-              </div>
-
-              {/* Sub-panel for Low-Light brightness options */}
-              {lowLightEnhance && (
-                <div className="mt-4 rounded-2xl border border-amber-500/20 bg-amber-950/20 p-4 transition">
-                  <div className="flex flex-wrap items-center justify-between gap-4">
-                    <div className="flex items-center gap-2">
-                      <Sun size={16} className="text-amber-400" />
-                      <span className="text-xs font-semibold text-amber-200">
-                        Cường độ làm sáng:
-                      </span>
-                      <span className="rounded-md bg-amber-500/20 px-2 py-0.5 text-xs font-bold text-amber-300">
-                        {Math.round(lowLightStrength * 100)}%
-                      </span>
-                    </div>
-
-                    {/* Presets and Slider */}
-                    <div className="flex flex-wrap items-center gap-3">
-                      <input
-                        type="range"
-                        min="0.1"
-                        max="1.0"
-                        step="0.05"
-                        disabled={loading}
-                        value={lowLightStrength}
-                        onChange={(e) => setLowLightStrength(parseFloat(e.target.value))}
-                        className="h-1.5 w-32 cursor-pointer appearance-none rounded-lg bg-zinc-700 accent-amber-500"
-                        title="Kéo để chỉnh độ sáng vừa mắt"
-                      />
-
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          disabled={loading}
-                          onClick={() => setLowLightStrength(0.35)}
-                          className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
-                            lowLightStrength <= 0.4
-                              ? "border border-amber-500/60 bg-amber-500/30 text-amber-200"
-                              : "border border-transparent bg-zinc-800/80 text-zinc-400 hover:text-zinc-200"
-                          }`}
-                          title="Sáng nhẹ, chống chói tối đa"
-                        >
-                          Sáng nhẹ (35%)
-                        </button>
-                        <button
-                          type="button"
-                          disabled={loading}
-                          onClick={() => setLowLightStrength(0.6)}
-                          className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
-                            lowLightStrength > 0.4 && lowLightStrength <= 0.75
-                              ? "border border-amber-500/60 bg-amber-500/30 text-amber-200"
-                              : "border border-transparent bg-zinc-800/80 text-zinc-400 hover:text-zinc-200"
-                          }`}
-                          title="Độ sáng tự nhiên, cân bằng nhất"
-                        >
-                          Tự nhiên (60%)
-                        </button>
-                        <button
-                          type="button"
-                          disabled={loading}
-                          onClick={() => setLowLightStrength(1.0)}
-                          className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
-                            lowLightStrength > 0.75
-                              ? "border border-amber-500/60 bg-amber-500/30 text-amber-200"
-                              : "border border-transparent bg-zinc-800/80 text-zinc-400 hover:text-zinc-200"
-                          }`}
-                          title="Làm sáng tối đa cho ảnh cực tối"
-                        >
-                          Rất tối (100%)
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Sub-panel for Face Restoration options */}
-              {faceEnhance && (
-                <div className="mt-4 rounded-2xl border border-violet-500/20 bg-violet-950/20 p-4 transition">
-                  <div className="flex flex-wrap items-center justify-between gap-4">
-                    {/* Face Engine */}
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-medium text-violet-300">
-                        Thuật toán:
-                      </span>
-                      <div className="flex rounded-lg bg-zinc-900/80 p-0.5 border border-zinc-800">
-                        <button
-                          type="button"
-                          disabled={loading}
-                          onClick={() => setFaceRestorer("codeformer")}
-                          className={`rounded-md px-3 py-1 text-xs font-semibold transition ${
-                            faceRestorer === "codeformer"
-                              ? "bg-violet-600 text-white shadow"
-                              : "text-zinc-400 hover:text-white"
-                          }`}
-                        >
-                          CodeFormer (Trị mờ nặng)
-                        </button>
-                        <button
-                          type="button"
-                          disabled={loading}
-                          onClick={() => setFaceRestorer("gfpgan")}
-                          className={`rounded-md px-3 py-1 text-xs font-semibold transition ${
-                            faceRestorer === "gfpgan"
-                              ? "bg-violet-600 text-white shadow"
-                              : "text-zinc-400 hover:text-white"
-                          }`}
-                        >
-                          GFPGAN
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Fidelity settings (for CodeFormer) */}
-                    {faceRestorer === "codeformer" && (
-                      <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-1.5 text-xs text-violet-300">
-                          <Sliders size={13} />
-                          <span>Mức độ tái tạo mắt & da:</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <button
-                            type="button"
-                            disabled={loading}
-                            onClick={() => setFidelity(0.2)}
-                            className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
-                              fidelity <= 0.3
-                                ? "bg-violet-500/30 text-violet-200 border border-violet-500/50"
-                                : "bg-zinc-800/80 text-zinc-400 hover:text-zinc-200 border border-transparent"
-                            }`}
-                            title="Tái tạo ngũ quan mạnh nhất cho ảnh out nét hoặc mờ tịt"
-                          >
-                            Cực mạnh (Ảnh rất mờ)
-                          </button>
-                          <button
-                            type="button"
-                            disabled={loading}
-                            onClick={() => setFidelity(0.5)}
-                            className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
-                              fidelity > 0.3 && fidelity <= 0.6
-                                ? "bg-violet-500/30 text-violet-200 border border-violet-500/50"
-                                : "bg-zinc-800/80 text-zinc-400 hover:text-zinc-200 border border-transparent"
-                            }`}
-                            title="Cân bằng giữa tái tạo nét và giữ đặc điểm nhận dạng"
-                          >
-                            Cân bằng
-                          </button>
-                          <button
-                            type="button"
-                            disabled={loading}
-                            onClick={() => setFidelity(0.8)}
-                            className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
-                              fidelity > 0.6
-                                ? "bg-violet-500/30 text-violet-200 border border-violet-500/50"
-                                : "bg-zinc-800/80 text-zinc-400 hover:text-zinc-200 border border-transparent"
-                            }`}
-                            title="Giữ tối đa nét gốc cho ảnh đã tương đối rõ"
-                          >
-                            Giữ nét gốc
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {loading && (
-                <p role="status" className="mt-4 text-sm text-violet-300">
-                  AI is processing your image
-                  {lowLightEnhance ? " with Retinexformer Low-Light" : ""}
-                  {faceEnhance ? ` + ${faceRestorer === "codeformer" ? "CodeFormer" : "GFPGAN"}` : ""}
-                  . Please wait...
-                </p>
-              )}
-
-              {error && (
-                <p role="alert" className="mt-4 text-sm text-red-400">
-                  {error}
-                </p>
               )}
             </div>
-          )}
-        </section>
 
-        <footer className="mt-10 text-center text-sm text-zinc-500">
-          Powered by Real-ESRGAN, CodeFormer & Retinexformer · Built with Next.js and FastAPI
+            <aside className="studio-controls">
+              <div className="mb-7">
+                <p className="eyebrow">01 · {isVi ? "Định dạng ảnh" : "Image type"}</p>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  {(["general", "anime"] as ModelType[]).map((type) => (
+                    <button key={type} type="button" disabled={loading} onClick={() => setModelType(type)} className={`segmented ${modelType === type ? "segmented-active" : ""}`}>
+                      <Layers3 size={15} /> {type === "general" ? (isVi ? "Ảnh chụp" : "Photography") : "Anime / 2D"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mb-7">
+                <div className="flex items-center justify-between">
+                  <p className="eyebrow">02 · {isVi ? "Độ phân giải" : "Resolution"}</p>
+                  <span className="text-xs text-zinc-500">{isVi ? "Phóng lớn" : "Upscale"}</span>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  {([2, 4] as UpscaleScale[]).map((value) => (
+                    <button key={value} type="button" disabled={loading} onClick={() => setScale(value)} className={`scale-option ${scale === value ? "scale-option-active" : ""}`}>
+                      <span className="text-lg font-semibold">{value}×</span>
+                      <span className="text-[10px] text-zinc-500">{value === 2 ? (isVi ? "Nhanh & nhẹ" : "Fast & light") : (isVi ? "Chi tiết tối đa" : "Maximum detail")}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mb-7">
+                <div className="flex flex-wrap items-end justify-between gap-3">
+                  <div>
+                    <p className="eyebrow">03 · {isVi ? "Nâng cấp thông minh" : "AI enhancements"}</p>
+                    <p className="mt-1.5 text-[11px] text-slate-500">
+                      {isVi ? "Có thể kết hợp nhiều chức năng cùng lúc" : "Combine multiple enhancements in one process"}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="rounded-full border border-blue-400/20 bg-blue-400/5 px-2.5 py-1 text-[10px] font-bold text-blue-300">
+                      {enabledEnhancements}/3 {isVi ? "đã bật" : "enabled"}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={loading}
+                      onClick={() => setAllEnhancements(enabledEnhancements !== 3)}
+                      className="text-[10px] font-semibold text-slate-400 transition hover:text-cyan-300 disabled:opacity-50"
+                    >
+                      {enabledEnhancements === 3
+                        ? (isVi ? "Tắt tất cả" : "Clear all")
+                        : (isVi ? "Bật tất cả" : "Enable all")}
+                    </button>
+                  </div>
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
+                  <ToggleCard active={freshnessEnhance} disabled={loading} onClick={() => setFreshnessEnhance((value) => !value)} icon={<RefreshCcw size={18} className="text-cyan-300" />} label={isVi ? "Làm tươi" : "Refresh"} description={isVi ? "Màu trong và sống động" : "Clean, vivid colors"} tone="cyan" />
+                  <ToggleCard active={lowLightEnhance} disabled={loading} onClick={() => setLowLightEnhance((value) => !value)} icon={<SunMedium size={18} className="text-sky-300" />} label={isVi ? "Làm sáng" : "Relight"} description={isVi ? "Cứu chi tiết vùng tối" : "Recover dark details"} tone="sky" />
+                  <ToggleCard active={faceEnhance} disabled={loading} onClick={() => setFaceEnhance((value) => !value)} icon={<ScanFace size={18} className="text-blue-300" />} label={isVi ? "Khuôn mặt" : "Face restore"} description={isVi ? "Phục hồi ngũ quan" : "Rebuild facial details"} />
+                </div>
+              </div>
+
+              {(freshnessEnhance || lowLightEnhance || faceEnhance) && (
+                <div className="mb-7 space-y-5 rounded-2xl border border-white/8 bg-black/20 p-4">
+                  {freshnessEnhance && (
+                    <RangeControl label={isVi ? "Độ tươi màu" : "Color freshness"} value={freshnessStrength} onChange={setFreshnessStrength} disabled={loading} accent="cyan" />
+                  )}
+                  {lowLightEnhance && (
+                    <RangeControl label={isVi ? "Cường độ làm sáng" : "Relight intensity"} value={lowLightStrength} onChange={setLowLightStrength} disabled={loading} accent="sky" min={0.1} />
+                  )}
+                  {faceEnhance && (
+                    <div>
+                      <div className="mb-2 flex items-center justify-between text-xs"><span className="text-zinc-400">{isVi ? "Phục hồi khuôn mặt" : "Face restoration"}</span><span className="text-blue-300">{faceRestorer === "codeformer" ? "CodeFormer" : "GFPGAN"}</span></div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {(["codeformer", "gfpgan"] as FaceRestorer[]).map((restorer) => <button key={restorer} type="button" disabled={loading} onClick={() => setFaceRestorer(restorer)} className={`mini-segment ${faceRestorer === restorer ? "mini-segment-active" : ""}`}>{restorer === "codeformer" ? (isVi ? "Ảnh mờ nặng" : "Severe blur") : (isVi ? "Tự nhiên" : "Natural")}</button>)}
+                      </div>
+                      {faceRestorer === "codeformer" && <div className="mt-4"><RangeControl label={isVi ? "Giữ nét nhận dạng" : "Identity fidelity"} value={fidelity} onChange={setFidelity} disabled={loading} accent="blue" min={0.2} max={0.8} /></div>}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {error && <p role="alert" className="mb-4 rounded-xl border border-red-400/20 bg-red-400/5 px-3 py-2.5 text-xs leading-5 text-red-300">{error}</p>}
+
+              <button type="button" onClick={handleEnhance} disabled={loading} className="primary-action">
+                {loading ? <LoaderCircle size={18} className="animate-spin" /> : <Zap size={18} fill="currentColor" />}
+                {loading ? (isVi ? "Đang xử lý…" : "Processing…") : result ? (isVi ? "Tạo lại phiên bản mới" : "Generate another version") : (isVi ? "Nâng cấp ảnh ngay" : "Enhance image now")}
+              </button>
+              {result && <a href={result} download="pixelforge-enhanced.png" className="secondary-action"><Download size={18} /> {isVi ? "Tải ảnh chất lượng cao" : "Download high-quality image"}</a>}
+            </aside>
+          </section>
+        )}
+
+        <footer className="mt-12 border-t border-white/5 py-7 text-center text-xs text-zinc-600">
+          Real-ESRGAN · CodeFormer · Retinexformer · {isVi ? "Xử lý cục bộ, không lưu trữ ảnh" : "Local processing, no image storage"}
         </footer>
       </div>
     </main>
+  );
+}
+
+function RangeControl({
+  accent,
+  disabled,
+  label,
+  max = 1,
+  min = 0.1,
+  onChange,
+  value,
+}: {
+  accent: "blue" | "cyan" | "sky";
+  disabled: boolean;
+  label: string;
+  max?: number;
+  min?: number;
+  onChange: (value: number) => void;
+  value: number;
+}) {
+  const valueTone = {
+    blue: "text-blue-300",
+    cyan: "text-cyan-300",
+    sky: "text-sky-300",
+  }[accent];
+  const rangeTone = {
+    blue: "text-blue-400 accent-blue-400",
+    cyan: "text-cyan-400 accent-cyan-400",
+    sky: "text-sky-400 accent-sky-400",
+  }[accent];
+
+  return (
+    <label className="block">
+      <span className="mb-2 flex items-center justify-between text-xs"><span className="text-zinc-400">{label}</span><span className={valueTone}>{Math.round(value * 100)}%</span></span>
+      <input type="range" min={min} max={max} step="0.05" disabled={disabled} value={value} onChange={(event) => onChange(Number(event.target.value))} className={`range-control ${rangeTone}`} />
+    </label>
   );
 }

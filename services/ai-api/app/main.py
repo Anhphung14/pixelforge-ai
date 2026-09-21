@@ -4,6 +4,7 @@ from io import BytesIO
 import logging
 from pathlib import Path
 import sys
+from threading import Lock
 
 # Ensure services/ai-api directory is in Python path
 API_DIR = Path(__file__).resolve().parent.parent
@@ -52,6 +53,7 @@ ALLOWED_IMAGE_TYPES = (
 logger = logging.getLogger(__name__)
 
 enhancer: ImageEnhancer | None = None
+inference_lock = Lock()
 
 
 # ==========================================
@@ -167,6 +169,18 @@ def enhance_image(
         le=1.0,
         description="Retinexformer brightness intensity: 0.1 to 1.0",
     ),
+
+    freshness_enhance: bool = Query(
+        default=False,
+        description="Enable natural color and contrast refresh",
+    ),
+
+    freshness_strength: float = Query(
+        default=0.55,
+        ge=0.1,
+        le=1.0,
+        description="Freshness intensity: 0.1 to 1.0",
+    ),
 ):
     # --------------------------------------
     # 1. Validate scale and model_type
@@ -261,17 +275,22 @@ def enhance_image(
             low_light_strength,
         )
 
-        result = enhancer.enhance(
-            image=image,
-            scale=scale,
-            strength=strength,
-            model_type=model_type,
-            face_enhance=face_enhance,
-            face_restorer=face_restorer,
-            fidelity=fidelity,
-            low_light_enhance=low_light_enhance,
-            low_light_strength=low_light_strength,
-        )
+        # The loaded restoration helpers keep mutable state and GPU inference can
+        # easily exhaust memory when multiple requests run concurrently.
+        with inference_lock:
+            result = enhancer.enhance(
+                image=image,
+                scale=scale,
+                strength=strength,
+                model_type=model_type,
+                face_enhance=face_enhance,
+                face_restorer=face_restorer,
+                fidelity=fidelity,
+                low_light_enhance=low_light_enhance,
+                low_light_strength=low_light_strength,
+                freshness_enhance=freshness_enhance,
+                freshness_strength=freshness_strength,
+            )
 
         # ----------------------------------
         # 6. Convert result to PNG

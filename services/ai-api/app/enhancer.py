@@ -6,7 +6,7 @@ from typing import Literal
 
 import cv2
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageEnhance
 import torch
 import torch.nn.functional as F
 from torchvision.transforms.functional import normalize
@@ -264,6 +264,30 @@ class ImageEnhancer:
         blended = orig_np * (1.0 - boost_weight) + out_np * boost_weight
         return Image.fromarray(np.clip(blended, 0, 255).astype(np.uint8))
 
+    def enhance_freshness(self, image: Image.Image, strength: float = 0.55) -> Image.Image:
+        """Refresh faded photos while keeping skin tones and highlights natural."""
+        strength = float(np.clip(strength, 0.1, 1.0))
+        rgb = image.convert("RGB")
+
+        # Saturation has the strongest visual impact. Contrast and brightness
+        # are deliberately subtle to avoid crushed shadows and clipped skin.
+        refreshed = ImageEnhance.Color(rgb).enhance(1.0 + 0.38 * strength)
+        refreshed = ImageEnhance.Contrast(refreshed).enhance(1.0 + 0.12 * strength)
+        refreshed = ImageEnhance.Brightness(refreshed).enhance(1.0 + 0.025 * strength)
+
+        original = np.asarray(rgb, dtype=np.float32)
+        boosted = np.asarray(refreshed, dtype=np.float32)
+        luminance = (
+            0.299 * original[..., 0]
+            + 0.587 * original[..., 1]
+            + 0.114 * original[..., 2]
+        ) / 255.0
+
+        # Reduce the effect in highlights to preserve clouds, lamps and skin.
+        highlight_guard = np.clip((1.15 - luminance) / 0.45, 0.25, 1.0)[..., None]
+        mixed = original + (boosted - original) * highlight_guard
+        return Image.fromarray(np.clip(mixed, 0, 255).astype(np.uint8))
+
     def _restore_faces_codeformer(
         self,
         bgr: np.ndarray,
@@ -326,6 +350,8 @@ class ImageEnhancer:
         fidelity: float = 0.5,
         low_light_enhance: bool = False,
         low_light_strength: float = 0.6,
+        freshness_enhance: bool = False,
+        freshness_strength: float = 0.55,
     ) -> Image.Image:
         try:
             if scale not in (2, 4):
@@ -339,6 +365,9 @@ class ImageEnhancer:
 
             if not 0.0 <= low_light_strength <= 1.0:
                 raise ValueError("Low-light strength must be between 0 and 1")
+
+            if not 0.0 <= freshness_strength <= 1.0:
+                raise ValueError("Freshness strength must be between 0 and 1")
 
             # Prevent memory explosion: downscale if input image is excessively large
             if max(image.width, image.height) > MAX_INPUT_DIMENSION:
@@ -358,7 +387,13 @@ class ImageEnhancer:
                 logger.info(f"Applying Retinexformer low-light enhancement (strength={low_light_strength})...")
                 image = self.enhance_low_light(image, strength=low_light_strength)
 
-            # Step 2: Select RealESRGAN upsampler
+            # Step 2: Refresh faded colors before super-resolution so the
+            # upsampler works with the final tonal structure.
+            if freshness_enhance:
+                logger.info(f"Refreshing image colors (strength={freshness_strength})...")
+                image = self.enhance_freshness(image, strength=freshness_strength)
+
+            # Step 3: Select RealESRGAN upsampler
             if model_type == "anime":
                 upsampler = self._get_anime_upsampler()
             else:
@@ -369,7 +404,7 @@ class ImageEnhancer:
 
             output = None
 
-            # Step 3: Face restoration (if requested)
+            # Step 4: Face restoration (if requested)
             if face_enhance:
                 if face_restorer == "codeformer":
                     try:
