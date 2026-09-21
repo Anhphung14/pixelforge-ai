@@ -13,21 +13,19 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "PixelForge AI — Phục hồi và nâng cấp ảnh",
-  description: "Studio AI làm nét, phục hồi khuôn mặt, cân bằng ánh sáng và làm tươi màu ảnh.",
-  icons: {
-    icon: "/favicon.svg",
-    apple: "/logo-mark.svg",
-  },
+	title: 'PixelForge AI',
+	description:
+		"PixelForge AI is a cutting-edge platform that leverages artificial intelligence to generate stunning pixel art and retro-style graphics. Whether you're a game developer, digital artist, or hobbyist, PixelForge AI provides the tools you need to create unique and captivating pixel art with ease.",
+	icons: {
+		icon: '/favicon.svg',
+		apple: '/logo-mark.svg',
+	},
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html
-      lang="vi"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col">{children}</body>
-    </html>
-  );
+		<html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
+			<body className="min-h-full flex flex-col">{children}</body>
+		</html>
+	);
 }
