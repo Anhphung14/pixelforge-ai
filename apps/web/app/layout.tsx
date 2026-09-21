@@ -15,6 +15,10 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "PixelForge AI — Phục hồi và nâng cấp ảnh",
   description: "Studio AI làm nét, phục hồi khuôn mặt, cân bằng ánh sáng và làm tươi màu ảnh.",
+  icons: {
+    icon: "/favicon.svg",
+    apple: "/logo-mark.svg",
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
