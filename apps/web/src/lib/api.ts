@@ -14,6 +14,8 @@ export interface EnhanceOptions {
   fidelity?: number;
   lowLightEnhance?: boolean;
   lowLightStrength?: number;
+  freshnessEnhance?: boolean;
+  freshnessStrength?: number;
   modelType?: ModelType;
   strength?: number;
   signal?: AbortSignal;
@@ -30,6 +32,8 @@ export async function enhanceImage(
     fidelity = 0.5,
     lowLightEnhance = false,
     lowLightStrength = 0.6,
+    freshnessEnhance = false,
+    freshnessStrength = 0.55,
     modelType = "general",
     strength = 1.0,
     signal,
@@ -45,6 +49,8 @@ export async function enhanceImage(
     fidelity: fidelity.toString(),
     low_light_enhance: lowLightEnhance.toString(),
     low_light_strength: lowLightStrength.toString(),
+    freshness_enhance: freshnessEnhance.toString(),
+    freshness_strength: freshnessStrength.toString(),
     model_type: modelType,
     strength: strength.toString(),
   });

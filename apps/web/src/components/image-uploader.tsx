@@ -1,120 +1,67 @@
-
 "use client";
 
 import { useRef, useState } from "react";
-import { UploadCloud } from "lucide-react";
+import { ArrowUp, ImagePlus, ShieldCheck } from "lucide-react";
 
-type Props = {
-  onFileSelect: (file: File) => void;
-  disabled?: boolean;
-};
+type Props = { onFileSelect: (file: File) => void; disabled?: boolean; language: "vi" | "en" };
 
-const ACCEPTED_TYPES = [
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-];
-
+const ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const MAX_SIZE = 10 * 1024 * 1024;
 
-export default function ImageUploader({
-  onFileSelect,
-  disabled = false,
-}: Props) {
+export default function ImageUploader({ onFileSelect, disabled = false, language }: Props) {
+  const isVi = language === "vi";
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState("");
 
   function validateFile(file: File) {
-    if (!ACCEPTED_TYPES.includes(file.type)) {
-      setError("Only JPG, PNG and WebP are supported.");
-      return;
-    }
-
-    if (file.size > MAX_SIZE) {
-      setError("Maximum file size is 10 MB.");
-      return;
-    }
-
+    if (!ACCEPTED_TYPES.includes(file.type)) return setError(isVi ? "Vui lòng chọn ảnh JPG, PNG hoặc WebP." : "Please choose a JPG, PNG or WebP image.");
+    if (file.size > MAX_SIZE) return setError(isVi ? "Ảnh vượt quá giới hạn 10 MB." : "The image exceeds the 10 MB limit.");
     setError("");
     onFileSelect(file);
+  }
+
+  function openPicker() {
+    if (!disabled) inputRef.current?.click();
   }
 
   return (
     <div>
       <div
-        onDragOver={(event) => {
-          event.preventDefault();
-          if (!disabled) setDragging(true);
+        role="button"
+        tabIndex={disabled ? -1 : 0}
+        aria-disabled={disabled}
+        onClick={openPicker}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            openPicker();
+          }
         }}
-        onDragLeave={() => setDragging(false)}
+        onDragOver={(event) => { event.preventDefault(); if (!disabled) setDragging(true); }}
+        onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false); }}
         onDrop={(event) => {
           event.preventDefault();
           setDragging(false);
-
-          if (disabled) return;
-
-          const file = event.dataTransfer.files[0];
-
-          if (file) validateFile(file);
+          if (!disabled && event.dataTransfer.files[0]) validateFile(event.dataTransfer.files[0]);
         }}
-        className={`
-          rounded-2xl border-2 border-dashed
-          p-10 text-center transition
-          ${
-            dragging
-              ? "border-violet-400 bg-violet-500/10"
-              : "border-zinc-700 bg-zinc-900"
-          }
-        `}
+        className={`upload-zone ${dragging ? "upload-zone-active" : ""}`}
       >
-        <UploadCloud
-          size={40}
-          className="mx-auto mb-4 text-violet-400"
-        />
-
-        <h3 className="text-lg font-semibold">
-          Upload your image
-        </h3>
-
-        <p className="mt-2 text-sm text-zinc-400">
-          Drag and drop an image here
-        </p>
-
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => inputRef.current?.click()}
-          className="mt-5 rounded-xl bg-violet-600 px-6 py-3 font-medium text-white hover:bg-violet-500 disabled:opacity-50"
-        >
-          Choose Image
-        </button>
-
-        <input
-          ref={inputRef}
-          type="file"
-          accept="image/jpeg,image/png,image/webp"
-          disabled={disabled}
-          className="hidden"
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-
-            if (file) validateFile(file);
-
-            event.target.value = "";
-          }}
-        />
-
-        <p className="mt-4 text-xs text-zinc-500">
-          JPG, PNG, WebP · Maximum 10 MB
-        </p>
+        <div className="upload-grid" />
+        <div className="relative">
+          <span className="mx-auto grid h-16 w-16 place-items-center rounded-2xl border border-blue-400/30 bg-blue-400/10 text-blue-300 shadow-2xl shadow-blue-500/20">
+            <ImagePlus size={28} />
+          </span>
+          <h2 className="mt-6 text-xl font-bold tracking-[-0.025em] sm:text-2xl">{isVi ? "Thả một bức ảnh vào đây" : "Drop an image here"}</h2>
+          <p className="mt-2 text-sm text-zinc-500">{isVi ? "hoặc chọn ảnh từ thiết bị để bắt đầu" : "or choose one from your device to begin"}</p>
+          <button type="button" disabled={disabled} onClick={(event) => { event.stopPropagation(); openPicker(); }} className="mt-6 inline-flex items-center gap-2 rounded-xl bg-blue-500 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-blue-500/20 transition hover:-translate-y-0.5 hover:bg-blue-400 disabled:opacity-50">
+            <ArrowUp size={16} /> {isVi ? "Chọn ảnh" : "Choose image"}
+          </button>
+          <div className="mt-6 flex items-center justify-center gap-2 text-[11px] text-zinc-600"><ShieldCheck size={14} /> {isVi ? "Ảnh chỉ được gửi tới AI chạy trên máy của bạn" : "Your image stays with the AI running on your device"}</div>
+        </div>
       </div>
-
-      {error && (
-        <p role="alert" className="mt-3 text-sm text-red-400">
-          {error}
-        </p>
-      )}
+      <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp" disabled={disabled} className="sr-only" onChange={(event) => { const selected = event.target.files?.[0]; if (selected) validateFile(selected); event.target.value = ""; }} />
+      {error && <p role="alert" className="mt-3 text-center text-sm text-red-400">{error}</p>}
     </div>
   );
 }
